@@ -20,7 +20,7 @@ resource "aws_internet_gateway" "main" {
 }
 
 resource "aws_subnet" "public" {
-  count = 2
+  count                   = 2
   vpc_id                  = aws_vpc.main.id
   cidr_block              = cidrsubnet("10.0.0.0/16", 2, count.index)
   availability_zone       = data.aws_availability_zones.available.names[count.index]
@@ -33,7 +33,7 @@ resource "aws_subnet" "private" {
   vpc_id            = aws_vpc.main.id
   cidr_block        = cidrsubnet("10.0.0.0/16", 2, 2)
   availability_zone = data.aws_availability_zones.available.names[0]
-  tags = { Name = "${var.project_name}/private"}
+  tags              = { Name = "${var.project_name}/private" }
 }
 
 resource "aws_eip" "nat" {
@@ -84,13 +84,14 @@ resource "aws_route_table_association" "private" {
 }
 
 module "alb" {
-  source = "./modules/alb"
-  project_name = var.project_name
+  source         = "./modules/alb"
+  project_name   = var.project_name
   public_subnets = aws_subnet.public[*].id
 }
 
 module "authentik" {
-  source = "./modules/authentik"
+  source       = "./modules/authentik"
   project_name = var.project_name
-  vpc_id = aws_vpc.main.id
+  vpc_id       = aws_vpc.main.id
 }
+ 

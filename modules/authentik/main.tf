@@ -1,6 +1,6 @@
 resource "aws_security_group" "alb" {
   name        = "${var.project_name}-alb"
-  description = "ALB – ruch publiczny HTTP/HTTPS"
+  description = "ALB – public HTTP/HTTPS traffic"
   vpc_id      = var.vpc_id
 
   ingress {
@@ -20,7 +20,7 @@ resource "aws_security_group" "alb" {
   }
 
   egress {
-    description     = "Do kontenerów Authentik"
+    description     = "Towards authentik containers"
     from_port       = 9000
     to_port         = 9000
     protocol        = "tcp"
@@ -32,7 +32,7 @@ resource "aws_security_group" "alb" {
 
 resource "aws_security_group" "authentik" {
   name        = "${var.project_name}-app"
-  description = "Kontenery Authentik (server + worker)"
+  description = "Authentik containers (server + worker)"
   vpc_id      = var.vpc_id
 
   egress {
@@ -58,11 +58,11 @@ resource "aws_security_group_rule" "authentik_from_alb" {
 
 resource "aws_security_group" "rds" {
   name        = "${var.project_name}-rds"
-  description = "RDS PostgreSQL – dostęp tylko z Authentik"
-  vpc_id      = aws_vpc.main.id
+  description = "RDS PostgreSQL – access only from authentik"
+  vpc_id      = var.vpc_id
 
   ingress {
-    description     = "PostgreSQL z kontenerów"
+    description     = "PostgreSQL from containers"
     from_port       = 5432
     to_port         = 5432
     protocol        = "tcp"
@@ -81,11 +81,11 @@ resource "aws_security_group" "rds" {
 
 resource "aws_security_group" "efs" {
   name        = "${var.project_name}-efs"
-  description = "EFS – dostęp tylko z Authentik"
-  vpc_id      = aws_vpc.main.id
+  description = "EFS – access only from Authentik"
+  vpc_id      = var.vpc_id
 
   ingress {
-    description     = "NFS z kontenerów"
+    description     = "NFS from containers"
     from_port       = 2049
     to_port         = 2049
     protocol        = "tcp"
@@ -100,4 +100,43 @@ resource "aws_security_group" "efs" {
   }
 
   tags = { Name = "${var.project_name}-efs" }
+}
+
+resource "aws_secretsmanager_secret" "db_password" {
+  name                    = "${var.project_name}/db-password"
+  recovery_window_in_days = 0 # natychmiastowe usunięcie przy destroy
+
+  tags = { Name = "${var.project_name}/db-password" }
+}
+
+resource "aws_secretsmanager_secret_version" "db_password" {
+  secret_id = aws_secretsmanager_secret.db_password.id
+  secret_string = jsonencode({
+    username = "authentik"
+    password = random_password.db.result
+  })
+}
+
+resource "random_password" "db" {
+  length           = 64
+  special          = true
+  override_special = "!#$%&*()-_=+[]{}|;:,.<>?"
+}
+
+resource "aws_secretsmanager_secret" "secret_key" {
+  name                    = "${var.project_name}/secret-key"
+  recovery_window_in_days = 0
+
+  tags = { Name = "${var.project_name}/secret-key" }
+}
+
+resource "aws_secretsmanager_secret_version" "secret_key" {
+  secret_id     = aws_secretsmanager_secret.secret_key.id
+  secret_string = random_password.secret_key.result
+}
+
+resource "random_password" "secret_key" {
+  length           = 64
+  special          = true
+  override_special = "!#$%&*()-_=+[]{}|;:,.<>?"
 }
