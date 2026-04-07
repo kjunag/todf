@@ -8,3 +8,8 @@ variable "project_name" {
     type = string
     default = "TODF"
 }
+variable "root_domain" {
+  description = "Root domain of whole project"
+  type = string
+  default = "todf.mom"
+}
