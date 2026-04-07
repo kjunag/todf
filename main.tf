@@ -88,3 +88,9 @@ module "alb" {
   project_name = var.project_name
   public_subnets = aws_subnet.public[*].id
 }
+
+module "authentik" {
+  source = "./modules/authentik"
+  project_name = var.project_name
+  vpc_id = aws_vpc.main.id
+}
