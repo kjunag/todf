@@ -1,6 +1,6 @@
 resource "aws_security_group" "alb" {
   name        = "${var.project_name}-alb"
-  description = "ALB – public HTTP/HTTPS traffic"
+  description = "ALB public HTTP HTTPS traffic"
   vpc_id      = var.vpc_id
 
   ingress {
@@ -58,7 +58,7 @@ resource "aws_security_group_rule" "authentik_from_alb" {
 
 resource "aws_security_group" "rds" {
   name        = "${var.project_name}-rds"
-  description = "RDS PostgreSQL – access only from authentik"
+  description = "RDS PostgreSQL access only from authentik"
   vpc_id      = var.vpc_id
 
   ingress {
@@ -81,7 +81,7 @@ resource "aws_security_group" "rds" {
 
 resource "aws_security_group" "efs" {
   name        = "${var.project_name}-efs"
-  description = "EFS – access only from Authentik"
+  description = "EFS access only from Authentik"
   vpc_id      = var.vpc_id
 
   ingress {
@@ -139,4 +139,35 @@ resource "random_password" "secret_key" {
   length           = 64
   special          = true
   override_special = "!#$%&*()-_=+[]{}|;:,.<>?"
+}
+
+
+resource "aws_db_subnet_group" "main" {
+  name       = "${var.project_name}-db"
+  subnet_ids = var.private_subnets
+
+  tags = { Name = "${var.project_name}-db" }
+}
+
+resource "aws_db_instance" "main" {
+  identifier        = "${var.project_name}-db"
+  engine            = "postgres"
+  engine_version    = var.db_version
+  instance_class    = "db.${var.db_instance_type}"
+  db_name           = "authentik"
+  username          = "authentik"
+  password          = random_password.db.result
+  allocated_storage = var.db_storage
+  storage_type      = "gp2"
+
+  db_subnet_group_name   = aws_db_subnet_group.main.name
+  vpc_security_group_ids = [aws_security_group.rds.id]
+
+  multi_az               = false
+  publicly_accessible    = false
+  copy_tags_to_snapshot  = true
+  skip_final_snapshot    = false
+  final_snapshot_identifier = "${var.project_name}-db-final"
+
+  tags = { Name = "${var.project_name}-db" }
 }
