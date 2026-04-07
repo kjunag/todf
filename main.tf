@@ -20,7 +20,7 @@ resource "aws_internet_gateway" "main" {
 }
 
 resource "aws_subnet" "public" {
-  count = 2
+  count                   = 2
   vpc_id                  = aws_vpc.main.id
   cidr_block              = cidrsubnet("10.0.0.0/16", 2, count.index)
   availability_zone       = data.aws_availability_zones.available.names[count.index]
@@ -113,12 +113,12 @@ resource "aws_iam_role_policy_attachment" "ecs_task_execution_role_policy" {
 }
 
 module "alb" {
-  source = "./modules/alb"
-  project_name = var.project_name
+  source         = "./modules/alb"
+  project_name   = var.project_name
   public_subnets = aws_subnet.public[*].id
 }
 
-<<<<<<< HEAD
+
 resource "aws_security_group" "efs" {
   name        = "${var.project_name}-efs-sg"
   description = "Pozwala na ruch NFS do wspolnego dysku EFS"
@@ -157,10 +157,12 @@ resource "aws_efs_mount_target" "shared" {
   file_system_id  = aws_efs_file_system.shared.id
   subnet_id       = aws_subnet.private[count.index].id
   security_groups = [aws_security_group.efs.id]
-=======
-module "authentik" {
-  source = "./modules/authentik"
-  project_name = var.project_name
-  vpc_id = aws_vpc.main.id
->>>>>>> ed76b09 (init authentik work)
 }
+module "authentik" {
+  source       = "./modules/authentik"
+  project_name = var.project_name
+
+  vpc_id = aws_vpc.main.id
+
+}
+
