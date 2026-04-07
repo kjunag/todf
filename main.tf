@@ -2,6 +2,9 @@ data "aws_availability_zones" "available" {
   state = "available"
 }
 
+# module "dns" {
+#   source = "./modules/dns"
+# }
 
 resource "aws_vpc" "main" {
   cidr_block           = "10.0.0.0/16"
@@ -78,4 +81,10 @@ resource "aws_route_table_association" "public" {
 resource "aws_route_table_association" "private" {
   subnet_id      = aws_subnet.private.id
   route_table_id = aws_route_table.private.id
+}
+
+module "alb" {
+  source = "./modules/alb"
+  project_name = var.project_name
+  public_subnets = aws_subnet.public[*].id
 }
