@@ -118,6 +118,7 @@ module "alb" {
   public_subnets = aws_subnet.public[*].id
 }
 
+<<<<<<< HEAD
 resource "aws_security_group" "efs" {
   name        = "${var.project_name}-efs-sg"
   description = "Pozwala na ruch NFS do wspolnego dysku EFS"
@@ -156,4 +157,10 @@ resource "aws_efs_mount_target" "shared" {
   file_system_id  = aws_efs_file_system.shared.id
   subnet_id       = aws_subnet.private[count.index].id
   security_groups = [aws_security_group.efs.id]
+=======
+module "authentik" {
+  source = "./modules/authentik"
+  project_name = var.project_name
+  vpc_id = aws_vpc.main.id
+>>>>>>> ed76b09 (init authentik work)
 }
