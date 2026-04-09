@@ -15,7 +15,7 @@ provider "aws" {
 
 # S3 
 resource "aws_s3_bucket" "terraform_state" {
-  bucket = "${var.project_name}-tfstate-bucket" # Nazwa musi być unikalna globalnie!
+  bucket = "${var.project_name}-tfstate-bucket" 
 }
 
 # Versioning
