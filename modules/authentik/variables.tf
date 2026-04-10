@@ -26,3 +26,8 @@ variable "private_subnets" {
   description = "List of private subnets in VPC"
   type = list(any)
 }
+
+variable "efs_id" {
+  description = "ID of project's main EFS"
+  type = string
+}

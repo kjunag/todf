@@ -158,10 +158,101 @@ resource "aws_efs_mount_target" "shared" {
   subnet_id       = aws_subnet.private[count.index].id
   security_groups = [aws_security_group.efs.id]
 }
+resource "aws_secretsmanager_secret" "db_password" {
+  name                    = "${var.project_name}/db-password"
+  recovery_window_in_days = 0 # natychmiastowe usunięcie przy destroy
+
+  tags = { Name = "${var.project_name}/db-password" }
+}
+
+resource "aws_secretsmanager_secret_version" "db_password" {
+  secret_id = aws_secretsmanager_secret.db_password.id
+  secret_string = jsonencode({
+    username = "authentik"
+    password = random_password.db.result
+  })
+}
+
+resource "random_password" "db" {
+  length           = 64
+  special          = true
+  override_special = "!#$%&*()-_=+[]{}|;:,.<>?"
+}
+
+resource "aws_secretsmanager_secret" "secret_key" {
+  name                    = "${var.project_name}/secret-key"
+  recovery_window_in_days = 0
+
+  tags = { Name = "${var.project_name}/secret-key" }
+}
+
+resource "aws_secretsmanager_secret_version" "secret_key" {
+  secret_id     = aws_secretsmanager_secret.secret_key.id
+  secret_string = random_password.secret_key.result
+}
+
+resource "random_password" "secret_key" {
+  length           = 64
+  special          = true
+  override_special = "!#$%&*()-_=+[]{}|;:,.<>?"
+}
+
+
+resource "aws_db_subnet_group" "main" {
+  name       = "${var.project_name}-db"
+  subnet_ids = aws_subnet.private[*].id
+
+  tags = { Name = "${var.project_name}-db" }
+}
+resource "aws_security_group" "rds" {
+  name        = "${var.project_name}-rds"
+  description = "Dostęp do PgSQL z całego VPC"
+  vpc_id      = aws_vpc.main.id
+
+  ingress {
+    description     = "PostgreSQL from VPC"
+    from_port       = 5432
+    to_port         = 5432
+    protocol        = "tcp"
+    cidr_blocks     = [aws_vpc.main.cidr_block] 
+  }
+
+  egress {
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  tags = { Name = "${var.project_name}-rds" }
+}
+resource "aws_db_instance" "main" {
+  identifier        = "${var.project_name}-db"
+  engine            = "postgres"
+  engine_version    = var.db_version
+  instance_class    = "db.${var.db_instance_type}"
+  db_name           = "authentik"
+  username          = "authentik"
+  password          = random_password.db.result
+  allocated_storage = var.db_storage
+  storage_type      = "gp2"
+
+  db_subnet_group_name   = aws_db_subnet_group.main.name
+  vpc_security_group_ids = [aws_security_group.rds.id]
+
+  multi_az               = false
+  publicly_accessible    = false
+  copy_tags_to_snapshot  = true
+  skip_final_snapshot    = false
+  final_snapshot_identifier = "${var.project_name}-db-final"
+
+  tags = { Name = "${var.project_name}-db" }
+}
 module "authentik" {
   source          = "./modules/authentik"
   project_name    = var.project_name
   vpc_id          = aws_vpc.main.id
   private_subnets = aws_subnet.private[*].id
+  efs_id          = aws_efs_file_system.shared.id
 }
 

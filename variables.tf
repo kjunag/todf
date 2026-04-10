@@ -13,3 +13,18 @@ variable "root_domain" {
   type = string
   default = "todf.mom"
 }
+variable "db_version" {
+  description = "Version of PGSQL"
+  type = string
+  default = "17"
+}
+variable "db_storage" {
+  description = "Disk size for PgSQL DB"
+  type = number
+  default = 10
+}
+variable "db_instance_type" {
+  description = "RDS instance type"
+  type = string
+  default = "m5.large"
+}
