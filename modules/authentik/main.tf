@@ -79,28 +79,6 @@ resource "aws_security_group" "rds" {
   tags = { Name = "${var.project_name}-rds" }
 }
 
-resource "aws_security_group" "efs" {
-  name        = "${var.project_name}-efs"
-  description = "EFS access only from Authentik"
-  vpc_id      = var.vpc_id
-
-  ingress {
-    description     = "NFS from containers"
-    from_port       = 2049
-    to_port         = 2049
-    protocol        = "tcp"
-    security_groups = [aws_security_group.authentik.id]
-  }
-
-  egress {
-    from_port   = 0
-    to_port     = 0
-    protocol    = "-1"
-    cidr_blocks = ["0.0.0.0/0"]
-  }
-
-  tags = { Name = "${var.project_name}-efs" }
-}
 
 resource "aws_secretsmanager_secret" "db_password" {
   name                    = "${var.project_name}/db-password"
