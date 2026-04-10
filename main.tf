@@ -30,11 +30,11 @@ resource "aws_subnet" "public" {
 }
 
 resource "aws_subnet" "private" {
-  count = 2
+  count = 2 
   vpc_id            = aws_vpc.main.id
   cidr_block        = cidrsubnet("10.0.0.0/16", 2, count.index + 2)
   availability_zone = data.aws_availability_zones.available.names[count.index]
-  tags = { Name = "${var.project_name}/private-${count.index + 1}"}
+  tags = { Name = "${var.project_name}/private-${count.index + 1}" }
 }
 
 resource "aws_eip" "nat" {
@@ -80,7 +80,7 @@ resource "aws_route_table_association" "public" {
 }
 
 resource "aws_route_table_association" "private" {
-  count          = 2
+  count = 2
   subnet_id      = aws_subnet.private[count.index].id
   route_table_id = aws_route_table.private.id
 }
