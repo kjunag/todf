@@ -2,9 +2,9 @@ data "aws_availability_zones" "available" {
   state = "available"
 }
 
-# module "dns" {
-#   source = "./modules/dns"
-# }
+module "dns" {
+   source = "./modules/dns"
+ }
 
 resource "aws_vpc" "main" {
   cidr_block           = "10.0.0.0/16"
@@ -156,4 +156,11 @@ resource "aws_efs_mount_target" "shared" {
   file_system_id  = aws_efs_file_system.shared.id
   subnet_id       = aws_subnet.private[count.index].id
   security_groups = [aws_security_group.efs.id]
+}
+
+module "acm" {
+  source = "./modules/acm"
+
+  domain_name = "todf.mom"
+  zone_id     = module.dns.zone_id 
 }
