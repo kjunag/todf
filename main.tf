@@ -226,27 +226,36 @@ resource "aws_security_group" "rds" {
 
   tags = { Name = "${var.project_name}-rds" }
 }
-resource "aws_db_instance" "main" {
-  identifier        = "${var.project_name}-db"
-  engine            = "postgres"
-  engine_version    = var.db_version
-  instance_class    = "db.${var.db_instance_type}"
-  db_name           = "authentik"
-  username          = "authentik"
-  password          = random_password.db.result
-  allocated_storage = var.db_storage
-  storage_type      = "gp2"
+resource "aws_rds_cluster" "main" {
+  cluster_identifier      = "${var.project_name}-db"
+  engine                  = "aurora-postgresql"
+  engine_mode             = "provisioned"   # required for Serverless v2
+  engine_version          = "16.4"          # nearest Aurora-Pg version to your current one
+  database_name           = "authentik"
+  master_username         = "authentik"
+  master_password         = random_password.db.result
+  db_subnet_group_name    = aws_db_subnet_group.main.name
+  vpc_security_group_ids  = [aws_security_group.rds.id]
 
-  db_subnet_group_name   = aws_db_subnet_group.main.name
-  vpc_security_group_ids = [aws_security_group.rds.id]
+  serverlessv2_scaling_configuration {
+    min_capacity = 0.5   # ACUs — scales to ~0 when idle (pauses billing)
+    max_capacity = 4     # raise as you add apps; 1 ACU ≈ 2 GB RAM
+  }
 
-  multi_az               = false
-  publicly_accessible    = false
-  copy_tags_to_snapshot  = true
-  skip_final_snapshot    = false
-  final_snapshot_identifier = "${var.project_name}-db-final"
+  skip_final_snapshot              = false
+  final_snapshot_identifier        = "${var.project_name}-db-final"
+  copy_tags_to_snapshot            = true
 
   tags = { Name = "${var.project_name}-db" }
+}
+resource "aws_rds_cluster_instance" "writer" {
+  identifier         = "${var.project_name}-db-writer"
+  cluster_identifier = aws_rds_cluster.main.id
+  instance_class     = "db.serverless"   # the magic value that enables SV2
+  engine             = aws_rds_cluster.main.engine
+  engine_version     = aws_rds_cluster.main.engine_version
+
+  tags = { Name = "${var.project_name}-db-writer" }
 }
 module "authentik" {
   source          = "./modules/authentik"

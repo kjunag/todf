@@ -14,9 +14,9 @@ variable "root_domain" {
   default = "todf.mom"
 }
 variable "db_version" {
-  description = "Version of PGSQL"
+  description = "Aurora PostgreSQL engine version"
   type = string
-  default = "17"
+  default = "16.4"
 }
 variable "db_storage" {
   description = "Disk size for PgSQL DB"
