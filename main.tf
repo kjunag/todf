@@ -2,9 +2,6 @@ data "aws_availability_zones" "available" {
   state = "available"
 }
 
-# module "dns" {
-#   source = "./modules/dns"
-# }
 
 resource "aws_vpc" "main" {
   cidr_block           = "10.0.0.0/16"
@@ -113,19 +110,21 @@ resource "aws_iam_role_policy_attachment" "ecs_task_execution_role_policy" {
 }
 
 module "alb" {
-  source         = "./modules/alb"
-  project_name   = var.project_name
-  public_subnets = aws_subnet.public[*].id
+  source          = "./modules/alb"
+  project_name    = var.project_name
+  public_subnets  = aws_subnet.public[*].id
+  vpc_id          = aws_vpc.main.id
+  certificate_arn = aws_acm_certificate_validation.main.certificate_arn
 }
 
 
 resource "aws_security_group" "efs" {
   name        = "${var.project_name}-efs-sg"
-  description = "Pozwala na ruch NFS do wspolnego dysku EFS"
+  description = "Allows NFS traffic to shared EFS"
   vpc_id      = aws_vpc.main.id
 
   ingress {
-    description = "NFS z calego VPC"
+    description = "NFS from entire VPC"
     from_port   = 2049
     to_port     = 2049
     protocol    = "tcp"
@@ -197,6 +196,23 @@ resource "random_password" "secret_key" {
   override_special = "!#$%&*()-_=+[]{}|;:,.<>?"
 }
 
+resource "random_password" "authentik_bootstrap" {
+  length  = 32
+  special = false
+}
+
+resource "aws_secretsmanager_secret" "authentik_bootstrap_password" {
+  name                    = "${var.project_name}/authentik-bootstrap-password"
+  recovery_window_in_days = 0
+
+  tags = { Name = "${var.project_name}/authentik-bootstrap-password" }
+}
+
+resource "aws_secretsmanager_secret_version" "authentik_bootstrap_password" {
+  secret_id     = aws_secretsmanager_secret.authentik_bootstrap_password.id
+  secret_string = random_password.authentik_bootstrap.result
+}
+
 
 resource "aws_db_subnet_group" "main" {
   name       = "${var.project_name}-db"
@@ -206,7 +222,7 @@ resource "aws_db_subnet_group" "main" {
 }
 resource "aws_security_group" "rds" {
   name        = "${var.project_name}-rds"
-  description = "Dostęp do PgSQL z całego VPC"
+  description = "PostgreSQL access from VPC"
   vpc_id      = aws_vpc.main.id
 
   ingress {
@@ -226,42 +242,57 @@ resource "aws_security_group" "rds" {
 
   tags = { Name = "${var.project_name}-rds" }
 }
-resource "aws_rds_cluster" "main" {
-  cluster_identifier      = "${var.project_name}-db"
-  engine                  = "aurora-postgresql"
-  engine_mode             = "provisioned"   # required for Serverless v2
-  engine_version          = "16.4"          # nearest Aurora-Pg version to your current one
-  database_name           = "authentik"
-  master_username         = "authentik"
-  master_password         = random_password.db.result
-  db_subnet_group_name    = aws_db_subnet_group.main.name
-  vpc_security_group_ids  = [aws_security_group.rds.id]
+resource "aws_db_instance" "main" {
+  identifier             = "${var.project_name}-db"
+  engine                 = "postgres"
+  engine_version         = "16.4"
+  instance_class         = "db.t4g.micro"
+  allocated_storage      = 20
+  storage_type           = "gp3"
+  db_name                = "authentik"
+  username               = "authentik"
+  password               = random_password.db.result
+  db_subnet_group_name   = aws_db_subnet_group.main.name
+  vpc_security_group_ids = [aws_security_group.rds.id]
 
-  serverlessv2_scaling_configuration {
-    min_capacity = 0.5   # ACUs — scales to ~0 when idle (pauses billing)
-    max_capacity = 4     # raise as you add apps; 1 ACU ≈ 2 GB RAM
-  }
-
-  skip_final_snapshot              = false
-  final_snapshot_identifier        = "${var.project_name}-db-final"
-  copy_tags_to_snapshot            = true
+  skip_final_snapshot       = false
+  final_snapshot_identifier = "${var.project_name}-db-final"
+  copy_tags_to_snapshot     = true
 
   tags = { Name = "${var.project_name}-db" }
 }
-resource "aws_rds_cluster_instance" "writer" {
-  identifier         = "${var.project_name}-db-writer"
-  cluster_identifier = aws_rds_cluster.main.id
-  instance_class     = "db.serverless"   # the magic value that enables SV2
-  engine             = aws_rds_cluster.main.engine
-  engine_version     = aws_rds_cluster.main.engine_version
+resource "aws_iam_role_policy" "ecs_secrets_access" {
+  name = "${var.project_name}-ecs-secrets"
+  role = aws_iam_role.ecs_task_execution_role.id
 
-  tags = { Name = "${var.project_name}-db-writer" }
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect   = "Allow"
+      Action   = ["secretsmanager:GetSecretValue"]
+      Resource = [
+        aws_secretsmanager_secret.db_password.arn,
+        aws_secretsmanager_secret.secret_key.arn,
+        aws_secretsmanager_secret.authentik_bootstrap_password.arn,
+      ]
+    }]
+  })
 }
+
 module "authentik" {
-  source          = "./modules/authentik"
-  project_name    = var.project_name
-  vpc_id          = aws_vpc.main.id
-  private_subnets = aws_subnet.private[*].id
-  efs_id          = aws_efs_file_system.shared.id
+  source                 = "./modules/authentik"
+  project_name           = var.project_name
+  vpc_id                 = aws_vpc.main.id
+  private_subnets        = aws_subnet.private[*].id
+  efs_id                 = aws_efs_file_system.shared.id
+  ecs_cluster_id         = aws_ecs_cluster.main.id
+  ecs_execution_role_arn = aws_iam_role.ecs_task_execution_role.arn
+  db_endpoint            = aws_db_instance.main.address
+  db_secret_arn          = aws_secretsmanager_secret.db_password.arn
+  secret_key_arn                    = aws_secretsmanager_secret.secret_key.arn
+  authentik_bootstrap_password_arn  = aws_secretsmanager_secret.authentik_bootstrap_password.arn
+  alb_sg_id                         = module.alb.alb_sg_id
+  https_listener_arn     = module.alb.https_listener_arn
+  root_domain            = var.root_domain
 }
 
