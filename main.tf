@@ -242,6 +242,51 @@ resource "aws_security_group" "rds" {
 
   tags = { Name = "${var.project_name}-rds" }
 }
+
+resource "aws_security_group" "redis" {
+  name        = "${var.project_name}-redis-sg"
+  description = "Redis for Authentik"
+  vpc_id      = aws_vpc.main.id
+
+  ingress {
+    from_port       = 6379
+    to_port         = 6379
+    protocol        = "tcp"
+    cidr_blocks     = [aws_vpc.main.cidr_block]
+    description     = "Redis from VPC"
+  }
+
+  egress {
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  tags = { Name = "${var.project_name}-redis" }
+}
+
+resource "aws_elasticache_subnet_group" "redis" {
+  name       = "${var.project_name}-redis-subnet"
+  subnet_ids = aws_subnet.private[*].id
+
+  tags = { Name = "${var.project_name}-redis-subnet" }
+}
+
+resource "aws_elasticache_cluster" "redis" {
+  cluster_id           = "${var.project_name}-redis"
+  engine               = "redis"
+  node_type            = "cache.t4g.micro"
+  num_cache_nodes      = 1
+  parameter_group_name = "default.redis7"
+  engine_version       = "7.1"
+  port                 = 6379
+  subnet_group_name    = aws_elasticache_subnet_group.redis.name
+  security_group_ids   = [aws_security_group.redis.id]
+
+  tags = { Name = "${var.project_name}-redis" }
+}
+
 resource "aws_db_instance" "main" {
   identifier             = "${var.project_name}-db"
   engine                 = "postgres"
@@ -294,5 +339,6 @@ module "authentik" {
   alb_sg_id                         = module.alb.alb_sg_id
   https_listener_arn     = module.alb.https_listener_arn
   root_domain            = var.root_domain
+  redis_endpoint         = aws_elasticache_cluster.redis.cache_nodes[0].address
 }
 
