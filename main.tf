@@ -2,6 +2,23 @@ data "aws_availability_zones" "available" {
   state = "available"
 }
 
+resource "aws_security_group_rule" "alb_egress_nextcloud" {
+  type                     = "egress"
+  from_port                = 80
+  to_port                  = 80
+  protocol                 = "tcp"
+  security_group_id        = module.alb.alb_sg_id
+  source_security_group_id = aws_security_group.nextcloud_task.id
+}
+
+resource "aws_security_group_rule" "alb_egress_collabora" {
+  type                     = "egress"
+  from_port                = 9980
+  to_port                  = 9980
+  protocol                 = "tcp"
+  security_group_id        = module.alb.alb_sg_id
+  source_security_group_id = aws_security_group.nextcloud_task.id
+}
 
 resource "aws_vpc" "main" {
   cidr_block           = "10.0.0.0/16"
@@ -9,6 +26,33 @@ resource "aws_vpc" "main" {
   enable_dns_support   = true
 
   tags = { Name = "${var.project_name}/vpc" }
+}
+
+resource "aws_security_group" "nextcloud_task" {
+  name        = "${var.project_name}-nextcloud-task"
+  description = "Security Group dla kontenerow Nextcloud"
+  vpc_id      = aws_vpc.main.id
+
+  ingress {
+    from_port       = 80
+    to_port         = 80
+    protocol        = "tcp"
+    security_groups = [module.alb.alb_sg_id]
+  }
+
+  ingress {
+    from_port       = 9980
+    to_port         = 9980
+    protocol        = "tcp"
+    security_groups = [module.alb.alb_sg_id]
+  }
+
+ egress {
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
 }
 
 resource "aws_internet_gateway" "main" {
@@ -128,7 +172,7 @@ resource "aws_security_group" "efs" {
     from_port   = 2049
     to_port     = 2049
     protocol    = "tcp"
-    cidr_blocks = [aws_vpc.main.cidr_block] 
+    cidr_blocks = [aws_vpc.main.cidr_block]
   }
 
   egress {
@@ -146,13 +190,13 @@ resource "aws_efs_file_system" "shared" {
   encrypted      = true 
 
   performance_mode = "generalPurpose"
-  throughput_mode  = "bursting" 
+  throughput_mode  = "elastic" 
 
   tags = { Name = "${var.project_name}-shared-efs" }
 }
 
 resource "aws_efs_mount_target" "shared" {
-  count           = 2
+  count           = length(aws_subnet.private)
   file_system_id  = aws_efs_file_system.shared.id
   subnet_id       = aws_subnet.private[count.index].id
   security_groups = [aws_security_group.efs.id]
@@ -300,7 +344,7 @@ resource "aws_db_instance" "main" {
   db_subnet_group_name   = aws_db_subnet_group.main.name
   vpc_security_group_ids = [aws_security_group.rds.id]
 
-  skip_final_snapshot       = false
+  skip_final_snapshot       = true #true when dev, on prod false 
   final_snapshot_identifier = "${var.project_name}-db-final"
   copy_tags_to_snapshot     = true
 
@@ -319,6 +363,7 @@ resource "aws_iam_role_policy" "ecs_secrets_access" {
         aws_secretsmanager_secret.db_password.arn,
         aws_secretsmanager_secret.secret_key.arn,
         aws_secretsmanager_secret.authentik_bootstrap_password.arn,
+        aws_secretsmanager_secret.nextcloud_db_password.arn,
       ]
     }]
   })
@@ -340,5 +385,29 @@ module "authentik" {
   https_listener_arn     = module.alb.https_listener_arn
   root_domain            = var.root_domain
   redis_endpoint         = aws_elasticache_cluster.redis.cache_nodes[0].address
+}
+
+module "nextcloud" {
+  source = "./modules/nextcloud"
+
+  project_name           = var.project_name
+  vpc_id                 = aws_vpc.main.id
+  subnets                = aws_subnet.private[*].id
+  cluster_id             = aws_ecs_cluster.main.id
+  alb_listener_https_arn = module.alb.https_listener_arn
+  alb_dns_name           = module.alb.load_balancer_dns     
+  alb_zone_id            = module.alb.load_balancer_zone_id
+  domain_name            = var.root_domain
+  domain_zone_id         = module.dns.zone_id
+
+  db_host                = aws_db_instance.main.address
+  db_secret_arn          = aws_secretsmanager_secret.nextcloud_db_password.arn 
+  redis_endpoint         = aws_elasticache_cluster.redis.cache_nodes[0].address
+
+  efs_id                 = aws_efs_file_system.shared.id
+
+  execution_role_arn     = aws_iam_role.ecs_task_execution_role.arn
+  task_role_arn          = aws_iam_role.ecs_task_execution_role.arn
+  security_group_id      = aws_security_group.nextcloud_task.id
 }
 
