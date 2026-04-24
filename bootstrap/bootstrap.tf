@@ -50,12 +50,13 @@ resource "aws_dynamodb_table" "terraform_state_lock" {
   }
 }
 
-# Create file with backend config
+# Generates shared backend config used by all stages.
+# Each stage specifies its own key in providers.tf.
+# Init command for each stage: terraform init -backend-config="../../backend_config.hcl"
 resource "local_file" "backend_config" {
   filename = "../backend_config.hcl"
   content  = <<-EOT
     bucket         = "${aws_s3_bucket.terraform_state.bucket}"
-    key            = "base/terraform.tfstate"
     region         = "${var.aws_region}"
     dynamodb_table = "${aws_dynamodb_table.terraform_state_lock.name}"
     encrypt        = true
