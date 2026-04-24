@@ -68,3 +68,8 @@ variable "authentik_version" {
   description = "Authentik container image version tag"
   default     = "2024.12.3"
 }
+
+variable "redis_endpoint" {
+  description = "Endpoint of the shared Redis cluster"
+  type        = string
+}

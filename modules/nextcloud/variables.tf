@@ -1,0 +1,63 @@
+variable "project_name" {
+  type = string
+}
+
+variable "vpc_id" {
+  type = string
+}
+
+variable "subnets" {
+  type = list(string)
+}
+
+variable "cluster_id" {
+  type = string
+}
+
+variable "alb_listener_https_arn" {
+  type = string
+}
+
+variable "domain_name" {
+  type = string
+}
+
+variable "db_host" {
+  type = string
+}
+
+variable "db_secret_arn" {
+  type = string
+}
+
+variable "redis_endpoint" {
+  type = string
+}
+
+variable "efs_id" {
+  type = string
+}
+
+variable "execution_role_arn" {
+  type = string
+}
+
+variable "task_role_arn" {
+  type = string
+}
+
+variable "security_group_id" {
+  type = string
+}
+
+variable "alb_dns_name" {
+  type = string
+}
+
+variable "alb_zone_id" {
+  type = string
+}
+
+variable "domain_zone_id" {
+  type = string
+}
