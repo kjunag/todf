@@ -1,0 +1,183 @@
+version: 1
+metadata:
+  name: Custom Authentication Flow
+entries:
+  - identifiers:
+      pk: 1764bfbe-79e7-4c69-bf24-379718c38725
+      slug: custom-authentication-flow
+    id: main-flow
+    model: authentik_flows.flow
+    attrs:
+      name: Custom Authentication
+      title: Log in
+      designation: authentication
+      authentication: none
+      background: ''
+      compatibility_mode: false
+      denied_action: message_continue
+      layout: stacked
+      policy_engine_mode: any
+
+  - identifiers:
+      pk: 5bfb22d8-ee7b-4c88-aae4-bbcf92fe01e3
+    id: policy-mfa-skip
+    model: authentik_policies_expression.expressionpolicy
+    attrs:
+      name: custom-authentication-flow-authenticator-validate-stage
+      execution_logging: false
+      expression: "flow_plan = request.context.get(\"flow_plan\")\nif not flow_plan:\n\
+        \    return True\n# if the authentication method is webauthn (passwordless),\
+        \ then we skip the authenticator\n# validation stage by returning false (true\
+        \ will execute the stage)\nreturn not (flow_plan.context.get(\"auth_method\"\
+        ) == \"auth_webauthn_pwl\")"
+
+  - identifiers:
+      pk: f6dae0df-ce78-47c1-9663-0cb06a47e84c
+    id: policy-password-skip
+    model: authentik_policies_expression.expressionpolicy
+    attrs:
+      name: custom-authentication-flow-password-stage
+      execution_logging: false
+      expression: "flow_plan = request.context.get(\"flow_plan\")\nif not flow_plan:\n\
+        \    return True\n# If the user does not have a backend attached to it, they\
+        \ haven't\n# been authenticated yet and we need the password stage\nreturn not\
+        \ hasattr(flow_plan.context.get(\"pending_user\"), \"backend\")"
+
+  - identifiers:
+      name: default-authentication-login
+      pk: afc1540e-6acd-4cf1-817a-3e545b8993cd
+    id: login-stage
+    model: authentik_stages_user_login.userloginstage
+    attrs:
+      geoip_binding: no_binding
+      network_binding: no_binding
+      remember_device: days=30
+      remember_me_offset: seconds=0
+      session_duration: seconds=0
+      terminate_other_sessions: false
+
+  - identifiers:
+      name: default-authentication-identification
+      pk: 373855d7-3498-4165-bead-1e6bd201e4a1
+    id: identification-stage
+    model: authentik_stages_identification.identificationstage
+    attrs:
+      captcha_stage: null
+      case_insensitive_matching: true
+      enable_remember_me: false
+      enrollment_flow: null
+      password_stage: null
+      passwordless_flow: cb02dab7-1cd2-406f-9c3a-05b6f0a98ef0
+      pretend_user_exists: true
+      recovery_flow: null
+      show_matched_user: true
+      show_source_labels: false
+      sources: []
+      user_fields:
+        - username
+        - email
+      webauthn_stage: null
+
+  - identifiers:
+      name: default-authentication-password
+      pk: 23e68cf8-dc40-4b48-8229-d844dd4aab80
+    id: password-stage
+    model: authentik_stages_password.passwordstage
+    attrs:
+      allow_show_password: false
+      backends:
+        - authentik.core.auth.InbuiltBackend
+        - authentik.sources.kerberos.auth.KerberosBackend
+        - authentik.sources.ldap.auth.LDAPBackend
+        - authentik.core.auth.TokenBackend
+      configure_flow: acb2fdac-04a8-4e23-a303-e6ccd6933004
+      failed_attempts_before_cancel: 5
+
+  - identifiers:
+      name: default-authentication-mfa-validation
+      pk: b7eea523-f8b6-4683-94ac-350ab6053cda
+    id: mfa-stage
+    model: authentik_stages_authenticator_validate.authenticatorvalidatestage
+    attrs:
+      configuration_stages: []
+      device_classes:
+        - static
+        - totp
+        - webauthn
+        - duo
+        - sms
+        - email
+      last_auth_threshold: seconds=0
+      not_configured_action: skip
+      webauthn_allowed_device_types: []
+      webauthn_user_verification: preferred
+
+  # Flow stage bindings
+  - identifiers:
+      target: !KeyOf main-flow
+      stage: !KeyOf identification-stage
+      order: 10
+    model: authentik_flows.flowstagebinding
+    attrs:
+      evaluate_on_plan: false
+      invalid_response_action: retry
+      policy_engine_mode: any
+      re_evaluate_policies: true
+
+  - identifiers:
+      target: !KeyOf main-flow
+      stage: !KeyOf password-stage
+      order: 20
+    id: binding-password
+    model: authentik_flows.flowstagebinding
+    attrs:
+      evaluate_on_plan: false
+      invalid_response_action: retry
+      policy_engine_mode: any
+      re_evaluate_policies: true
+
+  - identifiers:
+      target: !KeyOf main-flow
+      stage: !KeyOf mfa-stage
+      order: 30
+    id: binding-mfa
+    model: authentik_flows.flowstagebinding
+    attrs:
+      evaluate_on_plan: false
+      invalid_response_action: retry
+      policy_engine_mode: any
+      re_evaluate_policies: true
+
+  - identifiers:
+      target: !KeyOf main-flow
+      stage: !KeyOf login-stage
+      order: 100
+    model: authentik_flows.flowstagebinding
+    attrs:
+      evaluate_on_plan: false
+      invalid_response_action: retry
+      policy_engine_mode: any
+      re_evaluate_policies: true
+
+  # Policy bindings on stage bindings
+  - identifiers:
+      order: 10
+      policy: !KeyOf policy-password-skip
+      target: !KeyOf binding-password
+    model: authentik_policies.policybinding
+    attrs:
+      enabled: true
+      failure_result: true
+      negate: false
+      timeout: 30
+
+  - identifiers:
+      order: 10
+      policy: !KeyOf policy-mfa-skip
+      target: !KeyOf binding-mfa
+    model: authentik_policies.policybinding
+    attrs:
+      enabled: true
+      failure_result: true
+      negate: false
+      timeout: 30

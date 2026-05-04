@@ -112,8 +112,16 @@ locals {
     { name = "AUTHENTIK_POSTGRESQL__HOST", value = var.db_endpoint },
     { name = "AUTHENTIK_POSTGRESQL__NAME", value = "authentik" },
     { name = "AUTHENTIK_POSTGRESQL__USER", value = "authentik" },
+    { name = "AUTHENTIK_POSTGRESQL__SSLMODE", value = "require" },
     { name = "AUTHENTIK_ERROR_REPORTING__ENABLED", value = "false" },
     { name = "AUTHENTIK_LOG_LEVEL", value = "info" },
+    { name = "AUTHENTIK_EMAIL__HOST", value = var.email_host },
+    { name = "AUTHENTIK_EMAIL__PORT", value = tostring(var.email_port) },
+    { name = "AUTHENTIK_EMAIL__USERNAME", value = var.email_username },
+    { name = "AUTHENTIK_EMAIL__FROM", value = var.email_from },
+    { name = "AUTHENTIK_EMAIL__USE_TLS", value = tostring(var.email_use_tls) },
+    { name = "AUTHENTIK_EMAIL__USE_SSL", value = "false" },
+    { name = "AUTHENTIK_EMAIL__TIMEOUT", value = "10" },
   ]
 
   common_secrets = [
@@ -128,6 +136,10 @@ locals {
     {
       name      = "AUTHENTIK_BOOTSTRAP_PASSWORD"
       valueFrom = var.authentik_bootstrap_password_arn
+    },
+    {
+      name      = "AUTHENTIK_EMAIL__PASSWORD"
+      valueFrom = "${var.email_password_arn}:password::"
     },
   ]
 

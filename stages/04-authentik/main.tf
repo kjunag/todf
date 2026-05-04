@@ -48,6 +48,11 @@ module "authentik" {
   root_domain                      = var.root_domain
   redis_endpoint                   = data.terraform_remote_state.infra.outputs.redis_endpoint
   authentik_version                = var.authentik_version
+  email_host                       = var.email_host
+  email_port                       = var.email_port
+  email_username                   = var.email_username
+  email_from                       = var.email_from
+  email_password_arn               = data.terraform_remote_state.infra.outputs.resend_smtp_secret_arn
 }
 
 resource "aws_route53_record" "authentik" {

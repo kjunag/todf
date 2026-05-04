@@ -18,7 +18,7 @@ Wspólna infrastruktura: VPC, ECS Fargate, RDS PostgreSQL, ElastiCache Redis, EF
 - Terraform >= 1.5
 - AWS CLI skonfigurowane (`aws configure`) z uprawnieniami do tworzenia zasobów
 - Zarejestrowana domena (domyślnie `todf.mom`) z możliwością ustawienia serwerów NS
-- Konto na [resend.com](https://resend.com) (relay SMTP dla Stalwart)
+- Konto na [resend.com](https://resend.com) (relay SMTP dla Authentik i Stalwart)
 
 ---
 
@@ -34,6 +34,7 @@ stages/
   05-nextcloud/     # Nextcloud + Collabora na ECS
   06-stalwart/      # Stalwart mail server na ECS
 modules/            # moduły współdzielone przez stage'y
+authentik_blueprints/  # blueprinty do importu w Authentik (flow logowania, zaproszenia)
 backend_config.hcl  # generowany przez bootstrap — konfiguracja backendu S3
 ```
 
@@ -87,7 +88,7 @@ terraform apply
 
 **Po zakończeniu — ustaw klucz API Resend:**
 
-Stage tworzy sekret `todf/resend-smtp` z placeholderem hasła. Przed deploymentem Stalwart zastąp go prawdziwym kluczem API z resend.com:
+Stage tworzy sekret `todf/resend-smtp` z placeholderem hasła. Jest on używany zarówno przez Authentik (wysyłka e-maili), jak i przez Stalwart (relay SMTP). Przed deploymentem Authentik zastąp go prawdziwym kluczem API z resend.com:
 
 ```bash
 aws secretsmanager put-secret-value \
@@ -121,7 +122,9 @@ terraform init -backend-config="../../backend_config.hcl"
 terraform apply
 ```
 
-Hasło bootstrapowe aktualne admina pobierz z Secrets Manager:
+Domyślnie Authentik wysyła e-maile przez `smtp.resend.com:587` używając sekretu `todf/resend-smtp`. Nadawcą jest `noreply@todf.mom`. Wartości można zmienić przez zmienne Terraform (`email_host`, `email_port`, `email_username`, `email_from`).
+
+Hasło bootstrapowe admina pobierz z Secrets Manager:
 
 ```bash
 aws secretsmanager get-secret-value \
@@ -130,6 +133,16 @@ aws secretsmanager get-secret-value \
 ```
 
 Zaloguj się na `https://auth.todf.mom` i dokończ konfigurację.
+
+#### Blueprinty
+
+W katalogu `authentik_blueprints/` znajdują się gotowe blueprinty do zaimportowania w panelu Authentik (**Customisation → Blueprints → Import**):
+
+| Plik | Co tworzy |
+|------|-----------|
+| `passwordless-authentication-flow.yaml` | Flow logowania przez WebAuthn (passkey) — **importuj jako pierwszy** |
+| `default-authentication-flow.yaml` | Flow logowania hasłem + passkey (jako nowy flow `custom-authentication-flow`) |
+| `flows-invitation-enrollment.yaml` | Trzy flow do rejestracji przez zaproszenie (zewnętrzni, wewnętrzni, engineering) |
 
 ---
 
