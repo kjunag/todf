@@ -66,10 +66,42 @@ variable "root_domain" {
 variable "authentik_version" {
   type        = string
   description = "Authentik container image version tag"
-  default     = "2024.12.3"
+  default     = "2026.2.2"
 }
 
 variable "redis_endpoint" {
   description = "Endpoint of the shared Redis cluster"
   type        = string
+}
+
+variable "email_host" {
+  type        = string
+  description = "SMTP server hostname"
+}
+
+variable "email_port" {
+  type        = number
+  description = "SMTP server port"
+  default     = 587
+}
+
+variable "email_username" {
+  type        = string
+  description = "SMTP username"
+}
+
+variable "email_from" {
+  type        = string
+  description = "From address for outgoing emails"
+}
+
+variable "email_use_tls" {
+  type        = bool
+  description = "Use STARTTLS"
+  default     = true
+}
+
+variable "email_password_arn" {
+  type        = string
+  description = "Secrets Manager ARN for SMTP credentials (JSON with username/password fields)"
 }

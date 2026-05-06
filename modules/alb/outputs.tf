@@ -17,3 +17,8 @@ output "https_listener_arn" {
   description = "HTTPS listener ARN for app routing rules"
   value       = aws_lb_listener.https.arn
 }
+
+output "alb_arn" {
+  description = "ALB ARN"
+  value       = aws_lb.main.arn
+}

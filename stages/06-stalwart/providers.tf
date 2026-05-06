@@ -1,17 +1,14 @@
-terraform {  
+terraform {
   required_version = ">= 1.5"
 
-  # Backend config is inserted from backend_config.hcl
-  backend "s3" {}
+  backend "s3" {
+    key = "stages/06-stalwart/terraform.tfstate"
+  }
 
   required_providers {
     aws = {
       source  = "hashicorp/aws"
       version = "~> 6.0"
-    }
-    random = {
-      source  = "hashicorp/random"
-      version = "~> 3.0"
     }
   }
 }
