@@ -8,6 +8,7 @@ Infrastruktura self-hosted na AWS, zarządzana przez Terraform. Zawiera:
 | **Nextcloud** | `cloud.todf.mom` | Przechowywanie plików |
 | **Collabora** | `collabora.todf.mom` | Edytor dokumentów (online office dla Nextcloud) |
 | **Stalwart** | `mail.todf.mom` | Serwer e-mail (SMTP/IMAP) |
+| **Vaultwarden** | `vault.todf.mom` | Menedżer haseł (kompatybilny z Bitwarden) |
 
 Wspólna infrastruktura: VPC, ECS Fargate, RDS PostgreSQL, ElastiCache Redis, EFS, ALB, ACM, Route53.
 
@@ -33,6 +34,7 @@ stages/
   04-authentik/     # Authentik na ECS
   05-nextcloud/     # Nextcloud + Collabora na ECS
   06-stalwart/      # Stalwart mail server na ECS
+  07-vaultwarden/   # Vaultwarden password manager na ECS
 modules/            # moduły współdzielone przez stage'y
 authentik_blueprints/  # blueprinty do importu w Authentik (flow logowania, zaproszenia)
 backend_config.hcl  # generowany przez bootstrap — konfiguracja backendu S3
@@ -176,6 +178,30 @@ Zarządzanie mailem dostępne pod `https://mail.todf.mom`.
 
 ---
 
+### Krok 7 — Vaultwarden (`stages/07-vaultwarden`)
+
+Deployuje Vaultwarden (menedżer haseł kompatybilny z Bitwarden) na ECS Fargate. Stage automatycznie tworzy bazę danych `vaultwarden` w RDS.
+
+> Stage wymaga jedynie kroków 1–3 (DNS, infra, platform). Można go deployować niezależnie od Authentik, Nextcloud i Stalwart.
+
+```bash
+cd stages/07-vaultwarden
+terraform init -backend-config="../../backend_config.hcl"
+terraform apply
+```
+
+Panel administracyjny jest domyślnie włączony. Token admina pobierz z Secrets Manager:
+
+```bash
+aws secretsmanager get-secret-value \
+  --secret-id todf/vaultwarden-admin-token \
+  --query SecretString --output text
+```
+
+Vaultwarden dostępny pod `https://vault.todf.mom`, panel admina pod `https://vault.todf.mom/admin`.
+
+---
+
 ## Aktualizacja pojedynczego stage'a
 
 Każdy stage można deployować niezależnie — wejdź do jego katalogu i wykonaj `terraform apply`. Zmiany w jednym stage nie wymagają ponownego apply pozostałych, chyba że zmieniły się outputy, na których się opierają.
@@ -185,7 +211,7 @@ Każdy stage można deployować niezależnie — wejdź do jego katalogu i wykon
 Stage'y należy niszczyć w odwrotnej kolejności:
 
 ```bash
-for stage in 06-stalwart 05-nextcloud 04-authentik 03-platform 02-infra 01-dns; do
+for stage in 07-vaultwarden 06-stalwart 05-nextcloud 04-authentik 03-platform 02-infra 01-dns; do
   cd stages/$stage
   terraform destroy
   cd ../..

@@ -379,3 +379,39 @@ resource "aws_secretsmanager_secret_version" "resend_smtp" {
     ignore_changes = [secret_string]
   }
 }
+
+# --- Vaultwarden secrets ---
+
+resource "random_password" "vaultwarden_db" {
+  length  = 32
+  special = false
+}
+
+resource "aws_secretsmanager_secret" "vaultwarden_db_password" {
+  name                    = "${var.project_name}/vaultwarden-db-password"
+  recovery_window_in_days = 0
+
+  tags = { Name = "${var.project_name}/vaultwarden-db-password" }
+}
+
+resource "aws_secretsmanager_secret_version" "vaultwarden_db_password" {
+  secret_id     = aws_secretsmanager_secret.vaultwarden_db_password.id
+  secret_string = random_password.vaultwarden_db.result
+}
+
+resource "random_password" "vaultwarden_admin_token" {
+  length  = 48
+  special = false
+}
+
+resource "aws_secretsmanager_secret" "vaultwarden_admin_token" {
+  name                    = "${var.project_name}/vaultwarden-admin-token"
+  recovery_window_in_days = 0
+
+  tags = { Name = "${var.project_name}/vaultwarden-admin-token" }
+}
+
+resource "aws_secretsmanager_secret_version" "vaultwarden_admin_token" {
+  secret_id     = aws_secretsmanager_secret.vaultwarden_admin_token.id
+  secret_string = random_password.vaultwarden_admin_token.result
+}

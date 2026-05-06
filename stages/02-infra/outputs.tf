@@ -76,3 +76,11 @@ output "authentik_bootstrap_password" {
   value     = random_password.authentik_bootstrap.result
   sensitive = true
 }
+
+output "vaultwarden_db_password_arn" {
+  value = aws_secretsmanager_secret.vaultwarden_db_password.arn
+}
+
+output "vaultwarden_admin_token_arn" {
+  value = aws_secretsmanager_secret.vaultwarden_admin_token.arn
+}
