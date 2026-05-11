@@ -1,3 +1,14 @@
+terraform {
+  required_providers {
+    aws = {
+      source = "hashicorp/aws"
+    }
+    authentik = {
+      source = "goauthentik/authentik"
+    }
+  }
+}
+
 data "aws_region" "current" {}
 
 # --- Security Groups ---
@@ -176,11 +187,16 @@ resource "aws_ecs_task_definition" "vaultwarden" {
       protocol      = "tcp"
     }]
 
+    entryPoint = ["/bin/sh", "-c"]
+    command    = ["export DATABASE_URL=postgresql://vaultwarden:$DB_PASSWORD@${var.db_host}/vaultwarden?sslmode=require && exec /start.sh"]
+
     environment = [
       { name = "DOMAIN", value = "https://vault.${var.domain_name}" },
       { name = "ROCKET_PORT", value = "80" },
       { name = "SIGNUPS_ALLOWED", value = "false" },
-      { name = "DATABASE_URL", value = "postgresql://vaultwarden:$${DB_PASSWORD}@${var.db_host}/vaultwarden?sslmode=require" },
+      { name = "SSO_ENABLED", value = "true" },
+      { name = "SSO_CLIENT_ID", value = "vaultwarden" },
+      { name = "SSO_AUTHORITY", value = "${var.authentik_url}/application/o/vaultwarden/" },
     ]
 
     secrets = [
@@ -191,6 +207,10 @@ resource "aws_ecs_task_definition" "vaultwarden" {
       {
         name      = "ADMIN_TOKEN"
         valueFrom = var.admin_token_arn
+      },
+      {
+        name      = "SSO_CLIENT_SECRET"
+        valueFrom = aws_secretsmanager_secret.sso_client_secret.arn
       },
     ]
 
@@ -223,6 +243,79 @@ resource "aws_ecs_task_definition" "vaultwarden" {
   }
 
   tags = { Name = "${var.project_name}-vaultwarden" }
+}
+
+# --- Authentik SSO ---
+
+data "authentik_flow" "default_authorization" {
+  slug = "default-provider-authorization-implicit-consent"
+}
+
+data "authentik_flow" "default_invalidation" {
+  slug = "default-invalidation-flow"
+}
+
+data "authentik_certificate_key_pair" "default" {
+  name = "authentik Self-signed Certificate"
+}
+
+data "authentik_property_mapping_provider_scope" "openid" {
+  managed = "goauthentik.io/providers/oauth2/scope-openid"
+}
+
+resource "authentik_property_mapping_provider_scope" "email_verified" {
+  name       = "email-verified-vaultwarden"
+  scope_name = "email"
+  expression = <<-EOF
+    return {
+      "email": request.user.email,
+      "email_verified": True,
+    }
+  EOF
+}
+
+data "authentik_property_mapping_provider_scope" "profile" {
+  managed = "goauthentik.io/providers/oauth2/scope-profile"
+}
+
+resource "authentik_provider_oauth2" "vaultwarden" {
+  name      = "Vaultwarden"
+  client_id = "vaultwarden"
+
+  authorization_flow = data.authentik_flow.default_authorization.id
+  invalidation_flow  = data.authentik_flow.default_invalidation.id
+  signing_key        = data.authentik_certificate_key_pair.default.id
+
+  property_mappings = [
+    data.authentik_property_mapping_provider_scope.openid.id,
+    authentik_property_mapping_provider_scope.email_verified.id,
+    data.authentik_property_mapping_provider_scope.profile.id,
+  ]
+
+  allowed_redirect_uris = [
+    {
+      matching_mode = "strict"
+      url           = "https://vault.${var.domain_name}/identity/connect/oidc-signin"
+    }
+  ]
+}
+
+resource "authentik_application" "vaultwarden" {
+  name              = "Vaultwarden"
+  slug              = "vaultwarden"
+  protocol_provider = authentik_provider_oauth2.vaultwarden.id
+}
+
+resource "aws_secretsmanager_secret" "sso_client_secret" {
+  name                    = "${var.project_name}/vaultwarden/sso_client_secret"
+  recovery_window_in_days = 0
+
+  tags = { Name = "${var.project_name}/vaultwarden/sso_client_secret" }
+}
+
+resource "aws_secretsmanager_secret_version" "sso_client_secret" {
+  secret_id     = aws_secretsmanager_secret.sso_client_secret.id
+  secret_string = authentik_provider_oauth2.vaultwarden.client_secret
 }
 
 # --- ECS Service ---

@@ -333,3 +333,22 @@ resource "aws_ecs_service" "worker" {
 
   tags = { Name = "${var.project_name}-authentik-worker" }
 }
+
+resource "aws_secretsmanager_secret" "authentik_api_token" {
+  name                    = "${var.project_name}/authentik_api_token"
+  recovery_window_in_days = 0
+
+  tags = { Name = "${var.project_name}/authentik_api_token" }
+}
+
+resource "aws_secretsmanager_secret_version" "authentik_api_token" {
+  secret_id = aws_secretsmanager_secret.authentik_api_token.id
+  secret_string = jsonencode({
+    username = "akadmin"
+    password = "REPLACE_WITH_AUTHENTIK_API_TOKEN"
+  })
+
+  lifecycle {
+    ignore_changes = [secret_string]
+  }
+}
