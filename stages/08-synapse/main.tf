@@ -69,6 +69,132 @@ resource "aws_iam_role_policy" "synapse_secret_access" {
   })
 }
 
+data "aws_iam_policy_document" "lambda_assume_role" {
+  statement {
+    actions = ["sts:AssumeRole"]
+    principals {
+      type        = "Service"
+      identifiers = ["lambda.amazonaws.com"]
+    }
+  }
+}
+
+resource "aws_iam_role" "lambda_well_known_role" {
+  name               = "${var.project_name}-matrix-lambda-role"
+  assume_role_policy = data.aws_iam_policy_document.lambda_assume_role.json
+}
+
+resource "aws_iam_role_policy_attachment" "lambda_basic_execution" {
+  role       = aws_iam_role.lambda_well_known_role.name
+  policy_arn = "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
+}
+
+# --- 1b. Kod funkcji Lambda ---
+resource "aws_lambda_function" "well_known" {
+  filename      = "well_known.zip"
+  function_name = "${var.project_name}-matrix-well-known"
+  
+  # ZMIANA: Używamy nowo stworzonej roli zamiast roli z ECS
+  role          = aws_iam_role.lambda_well_known_role.arn
+  
+  handler       = "index.handler"
+  runtime       = "python3.12"
+
+  lifecycle {
+    ignore_changes = [filename]
+  }
+  
+  # Czekamy, aż rola zostanie w pełni przypisana, zanim stworzymy Lambdę
+  depends_on = [aws_iam_role_policy_attachment.lambda_basic_execution]
+}
+
+# Tworzenie paczki zip z kodem w locie
+resource "local_file" "lambda_code" {
+  filename = "${path.module}/index.py"
+  content  = <<EOT
+import json
+
+def handler(event, context):
+    path = event.get('path', '')
+    
+    if 'server' in path:
+        body = {"m.server": "matrix.${var.root_domain}:443"}
+    else:
+        body = {
+            "m.homeserver": {"base_url": "https://matrix.${var.root_domain}"},
+            "org.matrix.msc4143.rtc_foci": [{"type": "livekit", "livekit_service_url": "https://livekit-jwt.call.matrix.org"}],
+            "im.vector.riot.jitsi": {"preferredDomain": "meet.jit.si"}
+        }
+
+    return {
+        "statusCode": 200,
+        "statusDescription": "200 OK",
+        "isBase64Encoded": False,
+        "headers": {
+            "Content-Type": "application/json",
+            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Methods": "GET, OPTIONS",
+            "Access-Control-Allow-Headers": "Content-Type"
+        },
+        "body": json.dumps(body)
+    }
+EOT
+}
+
+data "archive_file" "lambda_zip" {
+  type        = "zip"
+  source_file = local_file.lambda_code.filename
+  output_path = "${path.module}/well_known.zip"
+}
+
+# Wymuszenie wgrania kodu przy tworzeniu
+resource "null_resource" "lambda_trigger" {
+  triggers = {
+    code_hash = data.archive_file.lambda_zip.output_base64sha256
+  }
+  provisioner "local-exec" {
+    command = "aws lambda update-function-code --function-name ${aws_lambda_function.well_known.function_name} --zip-file fileb://${data.archive_file.lambda_zip.output_path} --region ${var.aws_region}"
+  }
+  depends_on = [aws_lambda_function.well_known]
+}
+
+# 2. Target Group typu Lambda dla Load Balancera
+resource "aws_lb_target_group" "matrix_well_known" {
+  name        = "${var.project_name}-matrix-well-known"
+  target_type = "lambda"
+}
+
+resource "aws_lambda_permission" "alb" {
+  statement_id  = "AllowALBInvoke"
+  action        = "lambda:InvokeFunction"
+  function_name = aws_lambda_function.well_known.function_name
+  principal     = "elasticloadbalancing.amazonaws.com"
+  source_arn    = aws_lb_target_group.matrix_well_known.arn
+}
+
+resource "aws_lb_target_group_attachment" "matrix_well_known" {
+  target_group_arn = aws_lb_target_group.matrix_well_known.arn
+  target_id        = aws_lambda_function.well_known.arn
+  depends_on       = [aws_lambda_permission.alb]
+}
+
+# 3. Nowa, pojedyncza reguła Load Balancera kierująca ruch /.well-known do Lambdy
+resource "aws_lb_listener_rule" "matrix_well_known" {
+  listener_arn = data.terraform_remote_state.platform.outputs.https_listener_arn
+  priority     = 50
+
+  action {
+    type             = "forward"
+    target_group_arn = aws_lb_target_group.matrix_well_known.arn
+  }
+
+  condition {
+    path_pattern {
+      values = ["/.well-known/matrix/*"]
+    }
+  }
+}
+
 # --- SECURITY GROUPS ---
 
 resource "aws_security_group" "synapse_task" {
@@ -173,6 +299,7 @@ resource "null_resource" "run_db_setup" {
 
   depends_on = [aws_ecs_task_definition.db_setup, aws_iam_role_policy.synapse_secret_access]
 }
+
 
 # --- WYWOŁANIE MODUŁU SYNAPSE ---
 
