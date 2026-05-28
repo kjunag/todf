@@ -67,7 +67,7 @@ entries:
       enable_remember_me: false
       enrollment_flow: null
       password_stage: null
-      passwordless_flow: cb02dab7-1cd2-406f-9c3a-05b6f0a98ef0
+      passwordless_flow: !Find [authentik_flows.flow, [slug, passwordless-authentication-flow]]
       pretend_user_exists: true
       recovery_flow: null
       show_matched_user: true
@@ -90,7 +90,7 @@ entries:
         - authentik.sources.kerberos.auth.KerberosBackend
         - authentik.sources.ldap.auth.LDAPBackend
         - authentik.core.auth.TokenBackend
-      configure_flow: acb2fdac-04a8-4e23-a303-e6ccd6933004
+      configure_flow: null
       failed_attempts_before_cancel: 5
 
   - identifiers:
