@@ -12,3 +12,8 @@ output "worker_service_name" {
   description = "ECS service name for Authentik worker"
   value       = aws_ecs_service.worker.name
 }
+
+output "authentik_api_token_secret_arn" {
+  description = "ARN of the Authentik API token secret in Secrets Manager"
+  value       = aws_secretsmanager_secret.authentik_api_token.arn
+}

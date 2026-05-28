@@ -1,3 +1,18 @@
+data "terraform_remote_state" "authentik" {
+  backend = "s3"
+  config = {
+    bucket         = var.tf_state_bucket
+    key            = "stages/04-authentik/terraform.tfstate"
+    region         = var.aws_region
+    dynamodb_table = var.tf_state_lock_table
+    encrypt        = true
+  }
+}
+
+data "aws_secretsmanager_secret_version" "authentik_token" {
+  secret_id = data.terraform_remote_state.authentik.outputs.authentik_api_token_secret_arn
+}
+
 data "terraform_remote_state" "dns" {
   backend = "s3"
   config = {
@@ -127,6 +142,7 @@ module "vaultwarden" {
   domain_name                 = var.root_domain
   domain_zone_id              = data.terraform_remote_state.dns.outputs.zone_id
   vaultwarden_image           = var.vaultwarden_image
+  authentik_url               = data.terraform_remote_state.authentik.outputs.authentik_url
 
   depends_on = [null_resource.run_db_setup]
 }

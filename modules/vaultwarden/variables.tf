@@ -62,3 +62,7 @@ variable "vaultwarden_image" {
   type    = string
   default = "vaultwarden/server:latest"
 }
+
+variable "authentik_url" {
+  type = string
+}
