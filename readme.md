@@ -6,9 +6,10 @@ Infrastruktura self-hosted na AWS, zarządzana przez Terraform. Zawiera:
 |--------|-----------|------|
 | **Authentik** | `auth.todf.mom` | Identity provider / SSO |
 | **Nextcloud** | `cloud.todf.mom` | Przechowywanie plików |
-| **Collabora** | `collabora.todf.mom` | Edytor dokumentów (online office dla Nextcloud) |
-| **Stalwart** | `mail.todf.mom` | Serwer e-mail (SMTP/IMAP) |
+| **Collabora** | `office.todf.mom` | Edytor dokumentów (online office dla Nextcloud) |
+| **Stalwart** | `webmail.todf.mom` | Serwer e-mail (SMTP/IMAP) |
 | **Vaultwarden** | `vault.todf.mom` | Menedżer haseł (kompatybilny z Bitwarden) |
+| **Matrix Synapse** | `matrix.todf.mom` | Serwer czatu (protokół Matrix) |
 
 Wspólna infrastruktura: VPC, ECS Fargate, RDS PostgreSQL, ElastiCache Redis, EFS, ALB, ACM, Route53.
 
@@ -18,6 +19,7 @@ Wspólna infrastruktura: VPC, ECS Fargate, RDS PostgreSQL, ElastiCache Redis, EF
 
 - Terraform >= 1.5
 - AWS CLI skonfigurowane (`aws configure`) z uprawnieniami do tworzenia zasobów
+- Python 3 + `pip install requests pyyaml boto3` (do skryptu blueprintów)
 - Zarejestrowana domena (domyślnie `todf.mom`) z możliwością ustawienia serwerów NS
 - Konto na [resend.com](https://resend.com) (relay SMTP dla Authentik i Stalwart)
 
@@ -35,8 +37,10 @@ stages/
   05-nextcloud/     # Nextcloud + Collabora na ECS
   06-stalwart/      # Stalwart mail server na ECS
   07-vaultwarden/   # Vaultwarden password manager na ECS
+  08-synapse/       # Matrix Synapse na ECS
 modules/            # moduły współdzielone przez stage'y
-authentik_blueprints/  # blueprinty do importu w Authentik (flow logowania, zaproszenia)
+authentik_blueprints/  # blueprinty Authentik (flow logowania, zaproszenia)
+deploy_blueprints.py   # skrypt automatycznego wdrożenia blueprintów
 backend_config.hcl  # generowany przez bootstrap — konfiguracja backendu S3
 ```
 
@@ -136,15 +140,48 @@ aws secretsmanager get-secret-value \
 
 Zaloguj się na `https://auth.todf.mom` i dokończ konfigurację.
 
-#### Blueprinty
+#### Ustawienie API token Authentika
 
-W katalogu `authentik_blueprints/` znajdują się gotowe blueprinty do zaimportowania w panelu Authentik (**Customisation → Blueprints → Import**):
+Stages 07 (Vaultwarden) i 08 (Synapse) używają dostawcy Terraform dla Authentik oraz skrypt `deploy_blueprints.py` wymaga tokenu API. Po zalogowaniu do Authentik:
+
+1. Przejdź do **Admin → Directory → Tokens → Create**
+2. Ustaw Intent: **API**, użytkownik: `akadmin`
+3. Skopiuj wygenerowany klucz i zapisz go w Secrets Manager:
+
+```bash
+aws secretsmanager put-secret-value \
+  --secret-id todf/authentik_api_token \
+  --secret-string '{"username":"akadmin","password":"TWOJ_TOKEN_API"}'
+```
+
+> Bez tego kroku stages 07 i 08 oraz skrypt blueprintów nie będą działać.
+
+#### Blueprinty Authentika
+
+W katalogu `authentik_blueprints/` znajdują się gotowe blueprinty konfigurujące flow logowania.
 
 | Plik | Co tworzy |
 |------|-----------|
-| `passwordless-authentication-flow.yaml` | Flow logowania przez WebAuthn (passkey) — **importuj jako pierwszy** |
-| `default-authentication-flow.yaml` | Flow logowania hasłem + passkey (jako nowy flow `custom-authentication-flow`) |
-| `flows-invitation-enrollment.yaml` | Trzy flow do rejestracji przez zaproszenie (zewnętrzni, wewnętrzni, engineering) |
+| `passwordless-authentication-flow.yaml` | Flow logowania przez WebAuthn (passkey) |
+| `default-authentication-flow.yaml` | Flow logowania hasłem + passkey — ustawiany jako domyślny |
+| `flows-invitation-enrollment.yaml` | Trzy flow do rejestracji przez zaproszenie |
+
+**Automatyczny deployment (zalecany):**
+
+```bash
+cd /ścieżka/do/todf
+python deploy_blueprints.py
+```
+
+Skrypt automatycznie pobiera `AUTHENTIK_URL` i token z outputów Terraform oraz AWS Secrets Manager (wymaga aktywnych credentials AWS). Można też podać dane ręcznie:
+
+```bash
+export AUTHENTIK_URL="https://auth.todf.mom"
+export AUTHENTIK_TOKEN="twoj-token-api"
+python deploy_blueprints.py
+```
+
+Skrypt wykona upsert każdego blueprintu (tworzy lub aktualizuje), zastosuje go i na końcu ustawi `custom-authentication-flow` jako domyślny flow logowania w brandingu Authentika.
 
 ---
 
@@ -158,7 +195,8 @@ terraform init -backend-config="../../backend_config.hcl"
 terraform apply
 ```
 
-Nextcloud dostępny pod `https://cloud.todf.mom`.
+- Nextcloud: `https://cloud.todf.mom`
+- Collabora (online office): `https://office.todf.mom`
 
 ---
 
@@ -174,15 +212,15 @@ terraform init -backend-config="../../backend_config.hcl"
 terraform apply -var="stalwart_recovery_password=TWOJE_HASLO"
 ```
 
-Zarządzanie mailem dostępne pod `https://mail.todf.mom`.
+Panel administracyjny: `https://webmail.todf.mom`
 
 ---
 
 ### Krok 7 — Vaultwarden (`stages/07-vaultwarden`)
 
-Deployuje Vaultwarden (menedżer haseł kompatybilny z Bitwarden) na ECS Fargate. Stage automatycznie tworzy bazę danych `vaultwarden` w RDS.
+Deployuje Vaultwarden (menedżer haseł kompatybilny z Bitwarden) na ECS Fargate. Stage automatycznie tworzy bazę danych `vaultwarden` w RDS oraz konfiguruje aplikację SSO w Authentik.
 
-> Stage wymaga jedynie kroków 1–3 (DNS, infra, platform). Można go deployować niezależnie od Authentik, Nextcloud i Stalwart.
+> **Wymaga ukończonych kroków 1–4** oraz ustawionego tokenu API Authentika w Secrets Manager.
 
 ```bash
 cd stages/07-vaultwarden
@@ -198,7 +236,24 @@ aws secretsmanager get-secret-value \
   --query SecretString --output text
 ```
 
-Vaultwarden dostępny pod `https://vault.todf.mom`, panel admina pod `https://vault.todf.mom/admin`.
+- Vaultwarden: `https://vault.todf.mom`
+- Panel admina: `https://vault.todf.mom/admin`
+
+---
+
+### Krok 8 — Matrix Synapse (`stages/08-synapse`)
+
+Deployuje Matrix Synapse na ECS Fargate. Stage automatycznie tworzy bazę danych `synapse` w RDS, konfiguruje aplikację OIDC w Authentik oraz Lambda do obsługi `.well-known/matrix/*`.
+
+> **Wymaga ukończonych kroków 1–4** oraz ustawionego tokenu API Authentika w Secrets Manager.
+
+```bash
+cd stages/08-synapse
+terraform init -backend-config="../../backend_config.hcl"
+terraform apply
+```
+
+Matrix Synapse: `https://matrix.todf.mom`
 
 ---
 
@@ -211,7 +266,7 @@ Każdy stage można deployować niezależnie — wejdź do jego katalogu i wykon
 Stage'y należy niszczyć w odwrotnej kolejności:
 
 ```bash
-for stage in 07-vaultwarden 06-stalwart 05-nextcloud 04-authentik 03-platform 02-infra 01-dns; do
+for stage in 08-synapse 07-vaultwarden 06-stalwart 05-nextcloud 04-authentik 03-platform 02-infra 01-dns; do
   cd stages/$stage
   terraform destroy
   cd ../..
