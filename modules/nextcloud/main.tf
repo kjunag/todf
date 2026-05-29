@@ -128,8 +128,8 @@ resource "aws_ecs_task_definition" "nextcloud" {
   family                   = "${var.project_name}-nextcloud"
   network_mode             = "awsvpc"
   requires_compatibilities = ["FARGATE"]
-  cpu                      = "2048" # 2 vCPU
-  memory                   = "4096" # 4 GB RAM (Nextcloud i Collabora potrzebują trochę zasobów)
+  cpu                      = "2048" 
+  memory                   = "4096" 
   execution_role_arn       = var.execution_role_arn
   task_role_arn            = var.task_role_arn
 
@@ -149,6 +149,7 @@ resource "aws_ecs_task_definition" "nextcloud" {
     {
       name      = "nextcloud"
       image     = "nextcloud:apache"
+      memoryReservation = 1024
       essential = true
       
       portMappings = [
@@ -159,6 +160,43 @@ resource "aws_ecs_task_definition" "nextcloud" {
         }
       ]
 
+      command = [
+        "/bin/sh",
+        "-c",
+        <<-EOT
+        /entrypoint.sh apache2-foreground &
+
+        echo "Waiting for Nextcloud source files to extract..."
+         until [ -f occ ]; do
+           echo "Source files (occ) not found yet... waiting 2 seconds."
+           sleep 2
+        done
+        
+        echo "Checking Nextcloud installation status..."
+        until su -s /bin/sh -c "php occ status" www-data | grep -q "installed: true"; do
+          echo "Nextcloud is not ready yet... checking again in 5 seconds."
+          sleep 5
+        done
+        
+        echo "Nextcloud is fully installed. Starting app deployment..."
+        
+        echo "Installing application: Calendar..."
+        su -s /bin/sh -c "php occ app:install calendar" www-data || true
+        
+        echo "Installing application: Nextcloud Office (richdocuments)..."
+        su -s /bin/sh -c "php occ app:install richdocuments" www-data || true
+        
+        echo "Connecting Nextcloud Office to Collabora Online server..."
+        su -s /bin/sh -c "php occ config:app:set richdocuments wopi_url --value='https://office.${var.domain_name}'" www-data
+        
+        echo "Disabling the first-run wizard popup..."
+        su -s /bin/sh -c "php occ app:disable firstrunwizard" www-data || true
+        
+        echo "All core applications deployed and configured successfully!"
+        wait
+        EOT
+      ]
+
       environment = [
         { name = "POSTGRES_DB", value = "nextcloud" },
         { name = "POSTGRES_USER", value = "nextcloud" },
@@ -166,12 +204,17 @@ resource "aws_ecs_task_definition" "nextcloud" {
         { name = "REDIS_HOST", value = var.redis_endpoint },
         { name = "NEXTCLOUD_TRUSTED_DOMAINS", value = "cloud.${var.domain_name}" },
         { name = "OVERWRITEPROTOCOL", value = "https" },
-        { name = "OVERWRITECLIURL", value = "https://cloud.${var.domain_name}" }
+        { name = "OVERWRITECLIURL", value = "https://cloud.${var.domain_name}" },
+        { name = "NEXTCLOUD_ADMIN_USER", value = "admin" }
       ]
 
       secrets = [
         {
           name      = "POSTGRES_PASSWORD"
+          valueFrom = var.db_secret_arn
+        },
+        {
+          name      = "NEXTCLOUD_ADMIN_PASSWORD"
           valueFrom = var.db_secret_arn
         }
       ]
@@ -195,6 +238,7 @@ resource "aws_ecs_task_definition" "nextcloud" {
     {
       name      = "collabora"
       image     = "collabora/code:latest"
+      memoryReservation = 2048
       essential = true
 
       portMappings = [
