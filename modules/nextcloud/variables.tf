@@ -61,3 +61,8 @@ variable "alb_zone_id" {
 variable "domain_zone_id" {
   type = string
 }
+
+variable "oidc_secret_arn" {
+  type        = string
+  description = "ARN of the Secrets Manager secret containing the OIDC client secret"
+}

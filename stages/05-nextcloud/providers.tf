@@ -10,6 +10,10 @@ terraform {
       source  = "hashicorp/aws"
       version = "~> 6.0"
     }
+    authentik = {
+      source  = "goauthentik/authentik"
+      version = "~> 2026.2.0"
+    }
   }
 }
 

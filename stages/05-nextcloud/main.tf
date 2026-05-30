@@ -1,5 +1,6 @@
 data "aws_region" "current" {}
 
+# --- REMOTE STATES ---
 data "terraform_remote_state" "dns" {
   backend = "s3"
   config = {
@@ -33,8 +34,82 @@ data "terraform_remote_state" "platform" {
   }
 }
 
-# --- Security group (defined here to wire ALB egress rules in the same stage) ---
+data "aws_secretsmanager_secret" "authentik_token" {
+  name = "${var.project_name}/authentik_api_token"
+}
 
+data "aws_secretsmanager_secret_version" "authentik_token" {
+  secret_id = data.aws_secretsmanager_secret.authentik_token.id
+}
+
+provider "authentik" {
+  url   = "https://auth.${var.root_domain}"
+  token = jsondecode(data.aws_secretsmanager_secret_version.authentik_token.secret_string)["password"]
+}
+
+resource "random_password" "nextcloud_oidc_secret" {
+  length  = 32
+  special = false
+}
+
+resource "aws_secretsmanager_secret" "nextcloud_oidc_secret" {
+  name                    = "${var.project_name}/nextcloud-oidc-client-secret"
+  recovery_window_in_days = 0
+  tags                    = { Name = "${var.project_name}/nextcloud-oidc-client-secret" }
+}
+
+resource "aws_secretsmanager_secret_version" "nextcloud_oidc_secret" {
+  secret_id     = aws_secretsmanager_secret.nextcloud_oidc_secret.id
+  secret_string = random_password.nextcloud_oidc_secret.result
+}
+
+data "authentik_flow" "authorization" {
+  slug = "default-provider-authorization-implicit-consent"
+}
+
+data "authentik_flow" "invalidation" {
+  slug = "default-provider-invalidation-flow"
+}
+
+data "authentik_property_mapping_provider_scope" "oidc_scopes" {
+  managed_list = [
+    "goauthentik.io/providers/oauth2/scope-openid",
+    "goauthentik.io/providers/oauth2/scope-profile",
+    "goauthentik.io/providers/oauth2/scope-email"
+  ]
+}
+
+data "authentik_certificate_key_pair" "default" {
+  name = "authentik Self-signed Certificate"
+}
+
+resource "authentik_provider_oauth2" "nextcloud" {
+  name               = "${var.project_name}-nextcloud"
+  client_id          = "nextcloud"
+  client_secret      = random_password.nextcloud_oidc_secret.result
+  
+  authorization_flow = data.authentik_flow.authorization.id
+  invalidation_flow  = data.authentik_flow.invalidation.id
+
+  property_mappings  = data.authentik_property_mapping_provider_scope.oidc_scopes.ids
+  signing_key        = data.authentik_certificate_key_pair.default.id
+
+  allowed_redirect_uris = [
+    {
+      matching_mode = "strict"
+      url           = "https://cloud.${var.root_domain}/apps/user_oidc/code"
+    }
+  ]
+}
+
+resource "authentik_application" "nextcloud" {
+  name              = "Nextcloud"
+  slug              = "nextcloud"
+  protocol_provider = authentik_provider_oauth2.nextcloud.id 
+  open_in_new_tab   = true
+}
+
+# --- SECURITY GROUPS ---
 resource "aws_security_group" "nextcloud_task" {
   name        = "${var.project_name}-nextcloud-task"
   description = "Security group for Nextcloud and Collabora containers"
@@ -80,13 +155,11 @@ resource "aws_security_group_rule" "alb_egress_collabora" {
   source_security_group_id = aws_security_group.nextcloud_task.id
 }
 
-# --- DB setup ---
-
+# --- DB SETUP ---
 resource "aws_cloudwatch_log_group" "db_setup" {
   name              = "/ecs/${var.project_name}/nextcloud-db-setup"
   retention_in_days = 7
-
-  tags = { Name = "${var.project_name}-nextcloud-db-setup" }
+  tags              = { Name = "${var.project_name}-nextcloud-db-setup" }
 }
 
 resource "aws_ecs_task_definition" "db_setup" {
@@ -154,8 +227,7 @@ resource "null_resource" "run_db_setup" {
   depends_on = [aws_ecs_task_definition.db_setup]
 }
 
-# --- Nextcloud + Collabora ---
-
+# --- NEXTCLOUD + COLLABORA MODULE WIRE ---
 module "nextcloud" {
   source                 = "../../modules/nextcloud"
   project_name           = var.project_name
@@ -174,6 +246,7 @@ module "nextcloud" {
   execution_role_arn     = data.terraform_remote_state.infra.outputs.ecs_execution_role_arn
   task_role_arn          = data.terraform_remote_state.infra.outputs.ecs_execution_role_arn
   security_group_id      = aws_security_group.nextcloud_task.id
+  oidc_secret_arn        = aws_secretsmanager_secret.nextcloud_oidc_secret.arn
 
   depends_on = [null_resource.run_db_setup]
 }

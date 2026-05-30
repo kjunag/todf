@@ -147,10 +147,10 @@ resource "aws_ecs_task_definition" "nextcloud" {
 
   container_definitions = jsonencode([
     {
-      name      = "nextcloud"
-      image     = "nextcloud:apache"
+      name              = "nextcloud"
+      image             = "nextcloud:apache"
       memoryReservation = 1024
-      essential = true
+      essential         = true
       
       portMappings = [
         {
@@ -167,18 +167,21 @@ resource "aws_ecs_task_definition" "nextcloud" {
         /entrypoint.sh apache2-foreground &
 
         echo "Waiting for Nextcloud source files to extract..."
-         until [ -f occ ]; do
+        until [ -f occ ]; do
            echo "Source files (occ) not found yet... waiting 2 seconds."
            sleep 2
         done
         
         echo "Checking Nextcloud installation status..."
-        until su -s /bin/sh -c "php occ status" www-data | grep -q "installed: true"; do
+        until su -s /bin/sh -c "php occ status" www-data 2>/dev/null | grep -q "installed: true"; do
           echo "Nextcloud is not ready yet... checking again in 5 seconds."
           sleep 5
         done
         
         echo "Nextcloud is fully installed. Starting app deployment..."
+
+        echo "Dynamically adding container internal IP to trusted domains for ELB Health Check..."
+        su -s /bin/sh -c "php occ config:system:set trusted_domains 1 --value=$(hostname -i)" www-data
         
         echo "Installing application: Calendar..."
         su -s /bin/sh -c "php occ app:install calendar" www-data || true
@@ -189,10 +192,30 @@ resource "aws_ecs_task_definition" "nextcloud" {
         echo "Connecting Nextcloud Office to Collabora Online server..."
         su -s /bin/sh -c "php occ config:app:set richdocuments wopi_url --value='https://office.${var.domain_name}'" www-data
         
+        echo "Installing application: OpenID Connect Login (user_oidc)..."
+        su -s /bin/sh -c "php occ app:install user_oidc" www-data || true
+
+        echo "Configuring Authentik OIDC Identity Provider with stable mapping..."
+        su -s /bin/sh -c "php occ user_oidc:provider \
+          --clientid='nextcloud' \
+          --clientsecret='$OIDC_CLIENT_SECRET' \
+          --discoveryuri='https://auth.${var.domain_name}/application/o/nextcloud/.well-known/openid-configuration' \
+          --scope='openid profile email' \
+          --mapping-uid='sub' \
+          --mapping-email='email' \
+          --mapping-display-name='name' \
+          authentik" www-data || true
+
+        echo "Disabling strict SSL verification for local OIDC backchannel..."
+        su -s /bin/sh -c "php occ config:app:set user_oidc allow_multiple_user_backends --value='0' && php occ config:app:set user_oidc verify_peer_for_discovery_and_jwks --value='0'" www-data || true
+
+        echo "Enforcing Authentik SSO by hiding default login form..."
+        su -s /bin/sh -c "php occ config:app:set user_oidc hide_login_form --value='1'" www-data || true
+
         echo "Disabling the first-run wizard popup..."
         su -s /bin/sh -c "php occ app:disable firstrunwizard" www-data || true
         
-        echo "All core applications deployed and configured successfully!"
+        echo "All core applications and SSO integration deployed successfully!"
         wait
         EOT
       ]
@@ -205,7 +228,9 @@ resource "aws_ecs_task_definition" "nextcloud" {
         { name = "NEXTCLOUD_TRUSTED_DOMAINS", value = "cloud.${var.domain_name}" },
         { name = "OVERWRITEPROTOCOL", value = "https" },
         { name = "OVERWRITECLIURL", value = "https://cloud.${var.domain_name}" },
-        { name = "NEXTCLOUD_ADMIN_USER", value = "admin" }
+        { name = "NEXTCLOUD_ADMIN_USER", value = "admin" },
+        { name = "PGSSLMODE", value = "require" },
+        { name = "TRUSTED_PROXIES", value = "10.0.0.0/16" }
       ]
 
       secrets = [
@@ -216,6 +241,10 @@ resource "aws_ecs_task_definition" "nextcloud" {
         {
           name      = "NEXTCLOUD_ADMIN_PASSWORD"
           valueFrom = var.db_secret_arn
+        },
+        {
+          name      = "OIDC_CLIENT_SECRET"
+          valueFrom = var.oidc_secret_arn
         }
       ]
 
@@ -236,10 +265,10 @@ resource "aws_ecs_task_definition" "nextcloud" {
       }
     },
     {
-      name      = "collabora"
-      image     = "collabora/code:latest"
+      name              = "collabora"
+      image             = "collabora/code:latest"
       memoryReservation = 2048
-      essential = true
+      essential         = true
 
       portMappings = [
         {
@@ -274,7 +303,7 @@ resource "aws_ecs_service" "nextcloud" {
   task_definition        = aws_ecs_task_definition.nextcloud.arn
   desired_count          = 1
   launch_type            = "FARGATE"
-  enable_execute_command = true # Zostawiamy tunel do debugowania!
+  enable_execute_command = true
   
   health_check_grace_period_seconds = 1200
 
